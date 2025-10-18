@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderRepository } from '../repositories/order.repository';
 import { CreateOrderDto, UpdateOrderStatusDto } from '../dto/create-order.dto';
 import { Order, OrderStatus } from '@prisma/client';
+import { PaginatedResponse, PaginationQueryDto } from '../dto/pagination.dto';
 
 @Injectable()
 export class OrderService {
@@ -29,6 +30,10 @@ export class OrderService {
 
   async getOrdersByUserId(userId: string): Promise<Order[]> {
     return this.orderRepository.findByUserId(userId);
+  }
+
+  async getOrdersWithPagination(query: PaginationQueryDto): Promise<PaginatedResponse<Order>> {
+    return this.orderRepository.findWithPagination(query);
   }
 
   async updateOrderStatus(dto: UpdateOrderStatusDto): Promise<Order> {

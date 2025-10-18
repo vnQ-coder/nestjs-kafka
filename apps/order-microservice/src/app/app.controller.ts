@@ -2,6 +2,7 @@ import { Controller, Inject } from '@nestjs/common';
 import { ClientKafka, MessagePattern, Payload } from '@nestjs/microservices';
 import { OrderService } from './services/order.service';
 import { CreateOrderDto, UpdateOrderStatusDto } from './dto/create-order.dto';
+import { PaginationQueryDto } from './dto/pagination.dto';
 
 @Controller()
 export class AppController {
@@ -61,6 +62,21 @@ export class AppController {
         count: orders.length 
       };
     } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @MessagePattern('order.findWithPagination')
+  async getOrdersWithPagination(@Payload() query: PaginationQueryDto) {
+    console.log('📦 Fetching orders with pagination:', query);
+    try {
+      const result = await this.orderService.getOrdersWithPagination(query);
+      return { 
+        success: true, 
+        ...result
+      };
+    } catch (error) {
+      console.error('❌ Error fetching paginated orders:', error.message);
       return { success: false, error: error.message };
     }
   }

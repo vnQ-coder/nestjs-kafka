@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Post, Param, OnModuleInit, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Body, Controller, Get, Inject, Post, Param, OnModuleInit, HttpException, HttpStatus, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { AppService } from './app.service';
 import { ClientKafka } from '@nestjs/microservices';
 import { CreateUserDto, CreateOrderDto, CreatePaymentDto } from './dto';
@@ -18,7 +18,7 @@ export class AppController implements OnModuleInit {
   async onModuleInit() {
     // Subscribe to response topics
     const requestPatterns = [
-      'order.create', 'order.findAll', 'order.findById', 'order.findByUserId',
+      'order.create', 'order.findAll', 'order.findById', 'order.findByUserId', 'order.findWithPagination',
       'payment.create', 'payment.process', 'payment.findAll', 'payment.findByOrderId',
       'notification.findAll', 'notification.findByOrderId'
     ];
@@ -43,7 +43,8 @@ export class AppController implements OnModuleInit {
   @ApiOperation({ summary: 'Create a new user - Direct DB access (for now)' })
   @ApiResponse({ status: 201, description: 'User created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
-  async createUser(@Body() data: CreateUserDto) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async createUser(@Body() _data: CreateUserDto) {
     // Note: User management would typically be in a separate microservice
     // For now, keeping it in API Gateway for simplicity
     // In production, this should also go through a User microservice
@@ -120,10 +121,79 @@ export class AppController implements OnModuleInit {
 
   @ApiTags('Orders')
   @Get('orders')
-  @ApiOperation({ summary: 'Get all orders via order microservice' })
+  @ApiOperation({ 
+    summary: 'Get orders with cursor-based pagination',
+    description: `
+      Get orders with cursor-based pagination, sorting, and filtering.
+      
+      Query Parameters:
+      - cursor: The cursor from the previous page (use nextCursor or previousCursor from response)
+      - limit: Number of items per page (default: 10)
+      - sortBy: Field to sort by (createdAt, updatedAt, total, status)
+      - sortOrder: Sort direction (asc, desc)
+      - userId: Filter by user ID
+      - status: Filter by order status (PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED)
+      - select: Comma-separated fields to select (e.g., id,total,status)
+    `
+  })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor for pagination' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Number of items per page', example: 10 })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt', 'total', 'status'], description: 'Field to sort by' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction' })
+  @ApiQuery({ name: 'userId', required: false, description: 'Filter by user ID' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by order status' })
+  @ApiQuery({ name: 'select', required: false, description: 'Comma-separated fields to select' })
+  @ApiResponse({ status: 200, description: 'Returns paginated orders' })
+  @ApiResponse({ status: 408, description: 'Request timeout' })
+  async getOrders(
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: number,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
+    @Query('userId') userId?: string,
+    @Query('status') status?: string,
+    @Query('select') select?: string,
+  ) {
+    try {
+      // Build pagination query
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const paginationQuery: Record<string, any> = {};
+      if (cursor) paginationQuery.cursor = cursor;
+      if (limit) paginationQuery.limit = Number(limit);
+      if (sortBy) paginationQuery.sortBy = sortBy;
+      if (sortOrder) paginationQuery.sortOrder = sortOrder;
+      if (userId) paginationQuery.userId = userId;
+      if (status) paginationQuery.status = status;
+      if (select) paginationQuery.select = select.split(',').map(s => s.trim());
+
+      const response = await firstValueFrom(
+        this.kafkaClient
+          .send('order.findWithPagination', paginationQuery)
+          .pipe(timeout(5000))
+      );
+      
+      if (!response.success) {
+        throw new HttpException(response.error || 'Failed to fetch orders', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+      
+      return { 
+        orders: response.data, 
+        pagination: response.pagination
+      };
+    } catch (error) {
+      if (error.name === 'TimeoutError') {
+        throw new HttpException('Request timeout - Order service not responding', HttpStatus.REQUEST_TIMEOUT);
+      }
+      throw error;
+    }
+  }
+
+  @ApiTags('Orders')
+  @Get('orders/all')
+  @ApiOperation({ summary: 'Get all orders (without pagination) via order microservice' })
   @ApiResponse({ status: 200, description: 'Returns all orders' })
   @ApiResponse({ status: 408, description: 'Request timeout' })
-  async getOrders() {
+  async getAllOrders() {
     try {
       const response = await firstValueFrom(
         this.kafkaClient

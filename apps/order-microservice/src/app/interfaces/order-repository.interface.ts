@@ -1,10 +1,12 @@
 import { Order, OrderStatus } from '@prisma/client';
+import { PaginatedResponse, PaginationQueryDto } from '../dto/pagination.dto';
 
 export interface IOrderRepository {
   create(data: CreateOrderData): Promise<Order>;
   findById(id: string): Promise<Order | null>;
   findAll(): Promise<Order[]>;
   findByUserId(userId: string): Promise<Order[]>;
+  findWithPagination(query: PaginationQueryDto): Promise<PaginatedResponse<Order>>;
   updateStatus(id: string, status: OrderStatus): Promise<Order>;
   delete(id: string): Promise<void>;
 }
